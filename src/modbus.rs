@@ -1,4 +1,4 @@
-use crate::temperature::Request as TemperatureRequest;
+use crate::relay::Request as TemperatureRequest;
 use anyhow::Result;
 use log::{error, info};
 use std::{net::SocketAddr, sync::LazyLock};

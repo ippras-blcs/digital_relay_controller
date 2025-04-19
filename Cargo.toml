@@ -13,6 +13,7 @@ anyhow = "1.0.97"
 esp-idf-svc = { version = "0.51.0", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
 heapless = "0.8.0"
 log = "0.4.27"
+smart-leds = "0.4.0"
 thiserror = "2.0.12"
 tokio = { version = "1.44.1", features = ["rt", "net", "time", "io-util", "macros"] }
 tokio-modbus = { version = "0.16.1", features = ["tcp-server"] }

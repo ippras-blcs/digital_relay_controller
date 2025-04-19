@@ -36,15 +36,14 @@ fn main() -> Result<()> {
     // }
     // restart();
     let peripherals = Peripherals::take()?;
-    let mut led = PinDriver::output(peripherals.pins.gpio8)?;
+    let mut led = PinDriver::output(peripherals.pins.gpio4)?;
 
     loop {
         led.set_high()?;
-        info!("set_high");
         // we are sleeping here to make sure the watchdog isn't triggered
         FreeRtos::delay_ms(1000);
+
         led.set_low()?;
-        info!("set_low");
         FreeRtos::delay_ms(1000);
     }
 }
