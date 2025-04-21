@@ -16,6 +16,13 @@ pub(crate) type Request = (
     OneshotSender<Result<BTreeMap<u64, f32>, Error>>,
 );
 
+#[derive(Clone, Copy, Debug, Default)]
+pub enum State {
+    On,
+    #[default]
+    Off,
+}
+
 pub(super) fn start(
     pin: impl Peripheral<P = impl IOPin> + 'static,
     channel: impl Peripheral<P = impl RmtChannel> + 'static,

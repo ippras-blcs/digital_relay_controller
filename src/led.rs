@@ -2,59 +2,56 @@
 //     SmartLedsWrite, brightness, gamma,
 //     hsv::{Hsv, hsv2rgb},
 // };
-use anyhow::Result;
+use anyhow::{Error, Result};
 use esp_idf_svc::hal::{
-    prelude::Peripherals,
-    rmt::{FixedLengthSignal, PinState, Pulse, TxRmtDriver, config::TransmitConfig},
+    gpio::OutputPin,
+    peripheral::Peripheral,
+    rmt::{FixedLengthSignal, PinState, Pulse, RmtChannel, TxRmtDriver, config::TransmitConfig},
 };
-use tokio::time::{Duration, sleep};
+use log::{info, trace};
+use tokio::{
+    spawn,
+    sync::mpsc::{self, Sender},
+    time::{Duration, sleep},
+};
 
 const DELAY: Duration = Duration::from_millis(3000);
 const SLEEP: Duration = Duration::from_millis(10);
 
-pub(crate) async fn start(
-    pin: impl Peripheral<P = impl OutputPin> + 'a,
-    rmt: impl Peripheral<P = RMT> + 'a,
-) {
-    // let led = peripherals.pins.gpio2;
-    // let channel = peripherals.rmt.channel0;
+pub(crate) type Request = Result<Duration, Duration>;
+
+pub(crate) fn start(
+    pin: impl Peripheral<P = impl OutputPin> + 'static,
+    channel: impl Peripheral<P = impl RmtChannel> + 'static,
+) -> Result<Sender<Request>> {
     let config = TransmitConfig::new().clock_divider(1);
-    let mut tx = TxRmtDriver::new(channel, pin, &config)?;
-
-    // 3 seconds white at 10% brightness
-    neopixel(Rgb::new(25, 25, 25), &mut tx)?;
-    sleep(DELAY).await;
-    // infinite rainbow loop at 20% brightness
-    for i in (0..360).cycle() {
-        FreeRtos::delay_ms(10);
-        sleep(SLEEP).await;
-        let rgb = Rgb::from_hsv(hue, 100, 20)?;
-        neopixel(rgb, &mut tx)
-    }
-
-    // let mut buffer;
-    // loop {
-    //     // Iterate over the rainbow!
-    //     for hue in 0..=255 {
-    //         color.hue = hue;
-    //         // Convert from the HSV color space (where we can easily transition from one
-    //         // color to the other) to the RGB color space that we can then send to the LED
-    //         buffer = [hsv2rgb(color)];
-    //         // When sending to the LED, we do a gamma correction first (see smart_leds
-    //         // documentation for details) and then limit the brightness to 10 out of 255 so
-    //         // that the output it's not too bright.
-    //         led.adapter
-    //             .write(brightness(gamma(buffer.iter().cloned()), 1))
-    //             .unwrap();
-    //         Timer::after_millis(5).await;
-    //         // yield_now().await;
-    //     }
-    // }
+    let mut driver = TxRmtDriver::new(channel, pin, &config)?;
+    info!("LED driver initialized");
+    let (sender, mut receiver) = mpsc::channel::<Request>(9);
+    info!("Spawn LED receiver");
+    spawn(async move {
+        while let Some(request) = receiver.recv().await {
+            trace!("Read LED {request:?}");
+            match request {
+                Ok(duration) => {
+                    neopixel(&mut driver, Rgb::new(0, 255, 0))?;
+                    sleep(duration).await;
+                }
+                Err(duration) => {
+                    neopixel(&mut driver, Rgb::new(255, 0, 0))?;
+                    sleep(duration).await;
+                }
+            }
+            neopixel(&mut driver, Rgb::new(0, 0, 0))?;
+        }
+        Result::<_, Error>::Ok(())
+    });
+    Ok(sender)
 }
 
-fn neopixel(rgb: Rgb, tx: &mut TxRmtDriver) -> Result<()> {
+fn neopixel(driver: &mut TxRmtDriver, rgb: Rgb) -> Result<()> {
     let color: u32 = rgb.into();
-    let ticks_hz = tx.counter_clock()?;
+    let ticks_hz = driver.counter_clock()?;
     let (t0h, t0l, t1h, t1l) = (
         Pulse::new_with_duration(ticks_hz, PinState::High, &Duration::from_nanos(350))?,
         Pulse::new_with_duration(ticks_hz, PinState::Low, &Duration::from_nanos(800))?,
@@ -68,7 +65,7 @@ fn neopixel(rgb: Rgb, tx: &mut TxRmtDriver) -> Result<()> {
         let (high_pulse, low_pulse) = if bit { (t1h, t1l) } else { (t0h, t0l) };
         signal.set(23 - i as usize, &(high_pulse, low_pulse))?;
     }
-    tx.start_blocking(&signal)?;
+    driver.start_blocking(&signal)?;
     Ok(())
 }
 
@@ -83,30 +80,30 @@ impl Rgb {
         Self { r, g, b }
     }
 
-    /// Converts hue, saturation, value to RGB
-    pub fn from_hsv(h: u32, s: u32, v: u32) -> Result<Self> {
-        if h > 360 || s > 100 || v > 100 {
-            bail!("The given HSV values are not in valid range");
-        }
-        let s = s as f64 / 100.0;
-        let v = v as f64 / 100.0;
-        let c = s * v;
-        let x = c * (1.0 - (((h as f64 / 60.0) % 2.0) - 1.0).abs());
-        let m = v - c;
-        let (r, g, b) = match h {
-            0..=59 => (c, x, 0.0),
-            60..=119 => (x, c, 0.0),
-            120..=179 => (0.0, c, x),
-            180..=239 => (0.0, x, c),
-            240..=299 => (x, 0.0, c),
-            _ => (c, 0.0, x),
-        };
-        Ok(Self {
-            r: ((r + m) * 255.0) as u8,
-            g: ((g + m) * 255.0) as u8,
-            b: ((b + m) * 255.0) as u8,
-        })
-    }
+    // /// Converts hue, saturation, value to RGB
+    // pub fn from_hsv(h: u32, s: u32, v: u32) -> Result<Self> {
+    //     if h > 360 || s > 100 || v > 100 {
+    //         bail!("The given HSV values are not in valid range");
+    //     }
+    //     let s = s as f64 / 100.0;
+    //     let v = v as f64 / 100.0;
+    //     let c = s * v;
+    //     let x = c * (1.0 - (((h as f64 / 60.0) % 2.0) - 1.0).abs());
+    //     let m = v - c;
+    //     let (r, g, b) = match h {
+    //         0..=59 => (c, x, 0.0),
+    //         60..=119 => (x, c, 0.0),
+    //         120..=179 => (0.0, c, x),
+    //         180..=239 => (0.0, x, c),
+    //         240..=299 => (x, 0.0, c),
+    //         _ => (c, 0.0, x),
+    //     };
+    //     Ok(Self {
+    //         r: ((r + m) * 255.0) as u8,
+    //         g: ((g + m) * 255.0) as u8,
+    //         b: ((b + m) * 255.0) as u8,
+    //     })
+    // }
 }
 
 impl From<Rgb> for u32 {

@@ -1,10 +1,15 @@
 #![feature(impl_trait_in_assoc_type)]
 
-use anyhow::Result;
+use self::wifi::connect;
+use anyhow::{Result, bail};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
-        delay::FreeRtos, gpio::{PinDriver, Pull}, prelude::Peripherals, reset::restart
+        delay::FreeRtos,
+        gpio::{PinDriver, Pull},
+        prelude::Peripherals,
+        reset::restart,
+        rmt::{FixedLengthSignal, PinState, Pulse, TxRmtDriver, config::TransmitConfig},
     },
     io::vfs::MountedEventfs,
     log::EspLogger,
@@ -16,37 +21,25 @@ use esp_idf_svc::{
 use log::{error, info, warn};
 use tokio::{
     runtime::Builder,
+    spawn,
     time::{Duration, sleep},
 };
-use wifi::connect;
 
 fn main() -> Result<()> {
     link_patches();
     EspLogger::initialize_default();
-    // let _mounted_eventfs = MountedEventfs::mount(5)?;
-    // info!("System initialized");
-    // if let Err(error) = Builder::new_current_thread()
-    //     .enable_all()
-    //     .build()?
-    //     .block_on(run())
-    // {
-    //     error!("{error:?}");
-    // } else {
-    //     info!("`main()` finished, restarting");
-    // }
-    // restart();
-    let peripherals = Peripherals::take()?;
-    let mut led = PinDriver::output(peripherals.pins.gpio8)?;
-
-    loop {
-        led.set_high()?;
-        info!("set_high");
-        // we are sleeping here to make sure the watchdog isn't triggered
-        FreeRtos::delay_ms(1000);
-        led.set_low()?;
-        info!("set_low");
-        FreeRtos::delay_ms(1000);
+    let _mounted_eventfs = MountedEventfs::mount(5)?;
+    info!("System initialized");
+    if let Err(error) = Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+    {
+        error!("{error:?}");
+    } else {
+        info!("`main()` finished, restarting");
     }
+    restart();
 }
 
 async fn run() -> Result<()> {
@@ -55,38 +48,46 @@ async fn run() -> Result<()> {
     let peripherals = Peripherals::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
     // Initialize the network stack, this must be done before starting the server
-    // let mut wifi = connect(peripherals.modem, event_loop.clone(), timer, Some(nvs)).await?;
-    // let _subscription = event_loop.subscribe::<WifiEvent, _>(move |event| {
-    //     info!("Got event: {event:?}");
-    //     if let WifiEvent::StaDisconnected(_) = event {
-    //         if let Err(error) = wifi.connect() {
-    //             warn!("Wifi connect failed: {error}");
-    //         }
-    //     }
-    // })?;
+    let mut wifi = connect(peripherals.modem, event_loop.clone(), timer, Some(nvs)).await?;
+    let _subscription = event_loop.subscribe::<WifiEvent, _>(move |event| {
+        info!("Got event: {event:?}");
+        if let WifiEvent::StaDisconnected(_) = event {
+            if let Err(error) = wifi.connect() {
+                warn!("Wifi connect failed: {error}");
+            }
+        }
+    })?;
     // Start deadline checker
-    // deadline::start();
-    // Start temperature reader
-    // let temperature_sender = relay::start(peripherals.pins.gpio2, peripherals.rmt.channel0)?;
-    // Run modbus server
-    // modbus::run(temperature_sender.clone()).await?;
+    deadline::start();
     // Run led task
-    let pin = peripherals.pins.gpio4;
-    let mut driver = PinDriver::input_output(pin)?;
-    // info!("driver: {driver:?}");
-    // driver.set_pull(Pull::Floating)?;
-    loop {
-        driver.set_low()?;
-        info!("set_low");
-        sleep(Duration::from_secs(2)).await;
-        driver.set_high()?;
-        info!("set_high");
-        sleep(Duration::from_secs(2)).await;
+    // Start temperature reader
+    // Onboard RGB LED (ESP32-C3-DevKitC-02 pin gpio8)
+    let pin = peripherals.pins.gpio8;
+    let channel = peripherals.rmt.channel0;
+    let led_sender = led::start(pin, channel)?;
+    {
+        let led_sender = led_sender.clone();
+        spawn(async move {
+            loop {
+                led_sender
+                    .send(Ok(Duration::from_millis(100)))
+                    .await
+                    .unwrap();
+                sleep(Duration::from_millis(500)).await;
+                led_sender
+                    .send(Err(Duration::from_millis(100)))
+                    .await
+                    .unwrap();
+                sleep(Duration::from_millis(500)).await;
+            }
+        });
     }
+    // Run modbus server
+    modbus::run(led_sender.clone()).await?;
+    Ok(())
 }
 
-// mod modbus;
-// mod led;
-// mod relay;
 mod deadline;
+mod led;
+mod modbus;
 mod wifi;
