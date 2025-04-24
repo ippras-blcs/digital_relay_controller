@@ -1,6 +1,6 @@
 #![feature(impl_trait_in_assoc_type)]
 
-use self::wifi::connect;
+use self::{relay::Driver as RelayDriver, wifi::connect};
 use anyhow::{Result, bail};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -65,6 +65,22 @@ async fn run() -> Result<()> {
     let pin = peripherals.pins.gpio8;
     let channel = peripherals.rmt.channel0;
     let led_sender = led::start(pin, channel)?;
+    // {
+    //     let pin = peripherals.pins.gpio4;
+    //     let mut driver4 = PinDriver::input_output(pin)?;
+    //     let pin = peripherals.pins.gpio5;
+    //     let mut driver5 = PinDriver::input_output(pin)?;
+    //     spawn(async move {
+    //         loop {
+    //             driver4.set_low().unwrap();
+    //             info!("set_low");
+    //             sleep(Duration::from_secs(2)).await;
+    //             driver4.set_high().unwrap();
+    //             info!("set_high");
+    //             sleep(Duration::from_secs(2)).await;
+    //         }
+    //     });
+    // }
     {
         let led_sender = led_sender.clone();
         spawn(async move {
@@ -83,11 +99,17 @@ async fn run() -> Result<()> {
         });
     }
     // Run modbus server
-    modbus::run(led_sender.clone()).await?;
+    modbus::run(
+        peripherals.pins.gpio4,
+        peripherals.pins.gpio5,
+        led_sender.clone(),
+    )
+    .await?;
     Ok(())
 }
 
 mod deadline;
 mod led;
 mod modbus;
+mod relay;
 mod wifi;

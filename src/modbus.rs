@@ -1,6 +1,10 @@
 // use crate::relay::Request as LedRequest;
-use crate::led::Request as LedRequest;
+use crate::{RelayDriver, led::Request as LedRequest};
 use anyhow::Result;
+use esp_idf_hal::{
+    gpio::OutputPin,
+    peripheral::{Peripheral, PeripheralRef},
+};
 use log::{error, info, warn};
 use std::{net::SocketAddr, sync::LazyLock, time::Duration};
 use tokio::{
@@ -19,7 +23,13 @@ const INPUT_REGISTER_SIZE: usize = 6;
 
 static SOCKET_ADDR: LazyLock<SocketAddr> = LazyLock::new(|| "0.0.0.0:5502".parse().unwrap());
 
-pub(super) async fn run(led_sender: Sender<LedRequest>) -> Result<()> {
+pub(super) async fn run(
+    pin1: impl Peripheral<P = impl OutputPin> + 'static,
+    pin2: impl Peripheral<P = impl OutputPin> + 'static,
+    led_sender: Sender<LedRequest>,
+) -> Result<()> {
+    let driver1 = RelayDriver::new(pin1)?;
+    let driver2 = RelayDriver::new(pin2)?;
     let server = Server::new(TcpListener::bind(*SOCKET_ADDR).await?);
     let new_service = |_socket_addr| Ok(Some(ExampleService::new(led_sender.clone())));
     let on_connected = |stream, socket_addr| async move {
