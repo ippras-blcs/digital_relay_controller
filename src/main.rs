@@ -81,23 +81,23 @@ async fn run() -> Result<()> {
     //         }
     //     });
     // }
-    {
-        let led_sender = led_sender.clone();
-        spawn(async move {
-            loop {
-                led_sender
-                    .send(Ok(Duration::from_millis(100)))
-                    .await
-                    .unwrap();
-                sleep(Duration::from_millis(500)).await;
-                led_sender
-                    .send(Err(Duration::from_millis(100)))
-                    .await
-                    .unwrap();
-                sleep(Duration::from_millis(500)).await;
-            }
-        });
-    }
+    // {
+    //     let led_sender = led_sender.clone();
+    //     spawn(async move {
+    //         loop {
+    //             led_sender
+    //                 .send(Ok(Duration::from_millis(100)))
+    //                 .await
+    //                 .unwrap();
+    //             sleep(Duration::from_millis(500)).await;
+    //             led_sender
+    //                 .send(Err(Duration::from_millis(100)))
+    //                 .await
+    //                 .unwrap();
+    //             sleep(Duration::from_millis(500)).await;
+    //         }
+    //     });
+    // }
     // Run modbus server
     modbus::run(
         peripherals.pins.gpio4,

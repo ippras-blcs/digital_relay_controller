@@ -31,7 +31,7 @@ pub(super) async fn run(
     let driver1 = RelayDriver::new(pin1)?;
     let driver2 = RelayDriver::new(pin2)?;
     let server = Server::new(TcpListener::bind(*SOCKET_ADDR).await?);
-    let new_service = |_socket_addr| Ok(Some(ExampleService::new(led_sender.clone())));
+    let new_service = |_socket_addr| Ok(Some(RelayService::new(led_sender.clone())));
     let on_connected = |stream, socket_addr| async move {
         accept_tcp_connection(stream, socket_addr, new_service)
     };
@@ -40,17 +40,18 @@ pub(super) async fn run(
     Ok(())
 }
 
-struct ExampleService {
+/// Relay service
+struct RelayService {
     led_sender: Sender<LedRequest>,
 }
 
-impl ExampleService {
+impl RelayService {
     fn new(led_sender: Sender<LedRequest>) -> Self {
         Self { led_sender }
     }
 }
 
-impl Service for ExampleService {
+impl Service for RelayService {
     type Request = Request<'static>;
     type Response = Response;
     type Exception = ExceptionCode;
@@ -133,7 +134,10 @@ impl Service for ExampleService {
                 //         input_registers[address..count].to_vec(),
                 //     ))
                 // }
-                _ => Err(ExceptionCode::IllegalFunction),
+                _ => {
+                    let _ = led_sender.send(Err(Duration::from_millis(100))).await;
+                    Err(ExceptionCode::IllegalFunction)
+                }
             }
         }
     }
